@@ -621,6 +621,8 @@ def launch(hydra_config: DictConfig):
             if RANK == 0 and metrics is not None:
                 wandb.log(metrics, step=train_state.step)
                 progress_bar.update(train_state.step - progress_bar.n)  # type: ignore
+                if train_state.step % 50 == 0:
+                    tqdm.tqdm.write(f"step {train_state.step}: {metrics}")  # Visible when wandb is disabled
             if config.ema:
                 ema_helper.update(train_state.model)
 
@@ -646,6 +648,7 @@ def launch(hydra_config: DictConfig):
 
             if RANK == 0 and metrics is not None:
                 wandb.log(metrics, step=train_state.step)
+                print(f"eval at step {train_state.step}: {metrics}")  # Visible when wandb is disabled
                 
             ############ Checkpointing
             if RANK == 0:
