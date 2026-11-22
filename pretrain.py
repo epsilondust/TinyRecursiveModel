@@ -17,12 +17,20 @@ import coolname
 import hydra
 import pydantic
 from omegaconf import DictConfig
-from adam_atan2 import AdamATan2
+try:
+    from adam_atan2 import AdamATan2
+except ImportError:
+    # adam-atan2 needs a CUDA build. This pure-Python package applies the same update rule.
+    from adam_atan2_pytorch import AdamAtan2 as AdamATan2
 
 from puzzle_dataset import PuzzleDataset, PuzzleDatasetConfig, PuzzleDatasetMetadata
 from utils.functions import load_model_class, get_model_source_path
 from models.sparse_embedding import CastedSparseEmbeddingSignSGD_Distributed
 from models.ema import EMAHelper
+
+
+# Use CUDA when it is present, then Apple's MPS, then the CPU.
+DEVICE = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
 
 
 class LossConfig(pydantic.BaseModel):
@@ -107,7 +115,7 @@ def create_dataloader(config: PretrainConfig, split: str, rank: int, world_size:
         batch_size=None,
         num_workers=1,
         prefetch_factor=8,
-        pin_memory=True,
+        pin_memory=(DEVICE == "cuda"),  # Pinned memory only helps CUDA
         persistent_workers=True
     )
     return dataloader, dataset.metadata
@@ -122,16 +130,20 @@ def create_model(config: PretrainConfig, train_metadata: PuzzleDatasetMetadata, 
         num_puzzle_identifiers=train_metadata.num_puzzle_identifiers,
         causal=False  # Non-autoregressive
     )
+    # bfloat16 gives NaN losses on MPS, so only CUDA uses the configured dtype.
+    if DEVICE != "cuda":
+        model_cfg["forward_dtype"] = "float32"
 
     # Instantiate model with loss head
     model_cls = load_model_class(config.arch.name)
     loss_head_cls = load_model_class(config.arch.loss.name)
 
-    with torch.device("cuda"):
+    with torch.device(DEVICE):
         model: nn.Module = model_cls(model_cfg)
         print(model)
         model = loss_head_cls(model, **config.arch.loss.__pydantic_extra__)  # type: ignore
-        if "DISABLE_COMPILE" not in os.environ:
+        # torch.compile relies on Triton, which only supports CUDA.
+        if DEVICE == "cuda" and "DISABLE_COMPILE" not in os.environ:
             model = torch.compile(model)  # type: ignore
 
         # Load checkpoint
@@ -149,7 +161,7 @@ def create_model(config: PretrainConfig, train_metadata: PuzzleDatasetMetadata, 
         optimizers = [
             AdamATan2(
                 model.parameters(),
-                lr=0,  # Needs to be set by scheduler
+                lr=config.lr,  # The scheduler overwrites this on every step
                 weight_decay=config.weight_decay,
                 betas=(config.beta1, config.beta2)
             )
@@ -179,7 +191,7 @@ def create_model(config: PretrainConfig, train_metadata: PuzzleDatasetMetadata, 
             ),
             AdamATan2(
                 model.parameters(),
-                lr=0,  # Needs to be set by scheduler
+                lr=config.lr,  # The scheduler overwrites this on every step
                 weight_decay=config.weight_decay,
                 betas=(config.beta1, config.beta2)
             )
@@ -246,7 +258,7 @@ def load_checkpoint(model: nn.Module, config: PretrainConfig):
         print(f"Loading checkpoint {config.load_checkpoint}")
 
         # Load state dict
-        state_dict = torch.load(config.load_checkpoint, map_location="cuda")
+        state_dict = torch.load(config.load_checkpoint, map_location=DEVICE)
 
         # Resize and reset puzzle emb if needed
         puzzle_emb_name = "_orig_mod.model.inner.puzzle_emb.weights"
@@ -292,11 +304,11 @@ def train_batch(config: PretrainConfig, train_state: TrainState, batch: Any, glo
         return
 
     # To device
-    batch = {k: v.cuda() for k, v in batch.items()}
+    batch = {k: v.to(DEVICE) for k, v in batch.items()}
 
     # Init carry if it is None
     if train_state.carry is None:
-        with torch.device("cuda"):
+        with torch.device(DEVICE):
             train_state.carry = train_state.model.initial_carry(batch)  # type: ignore
 
     # Forward
@@ -377,8 +389,8 @@ def evaluate(
                 print(f"Processing batch {processed_batches}: {set_name}")
             
             # To device
-            batch = {k: v.cuda() for k, v in batch.items()}
-            with torch.device("cuda"):
+            batch = {k: v.to(DEVICE) for k, v in batch.items()}
+            with torch.device(DEVICE):
                 carry = train_state.model.initial_carry(batch)  # type: ignore
 
             # Forward
@@ -414,7 +426,7 @@ def evaluate(
                     sorted(metrics.keys())
                 )  # Sort keys to guarantee all processes use the same order.
                 metric_values = torch.zeros(
-                    (len(set_ids), len(metrics.values())), dtype=torch.float32, device="cuda"
+                    (len(set_ids), len(metrics.values())), dtype=torch.float32, device=DEVICE
                 )
 
             metric_values[set_id] += torch.stack([metrics[k] for k in metric_keys])
@@ -609,6 +621,8 @@ def launch(hydra_config: DictConfig):
             if RANK == 0 and metrics is not None:
                 wandb.log(metrics, step=train_state.step)
                 progress_bar.update(train_state.step - progress_bar.n)  # type: ignore
+                if train_state.step % 50 == 0:
+                    tqdm.tqdm.write(f"step {train_state.step}: {metrics}")  # Visible when wandb is disabled
             if config.ema:
                 ema_helper.update(train_state.model)
 
@@ -634,6 +648,7 @@ def launch(hydra_config: DictConfig):
 
             if RANK == 0 and metrics is not None:
                 wandb.log(metrics, step=train_state.step)
+                print(f"eval at step {train_state.step}: {metrics}")  # Visible when wandb is disabled
                 
             ############ Checkpointing
             if RANK == 0:
