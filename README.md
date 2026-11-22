@@ -1,7 +1,105 @@
 # TinyRecursiveModel
 Experiments with Tiny Recursive Model
 
-This repository is a fork of [SamsungSAILMontreal/TinyRecursiveModels](https://github.com/SamsungSAILMontreal/TinyRecursiveModels). The original README follows.
+This repository is a fork of [SamsungSAILMontreal/TinyRecursiveModels](https://github.com/SamsungSAILMontreal/TinyRecursiveModels). The original README follows the sections below.
+
+## What this fork is for
+
+This fork is a place to learn how the Tiny Recursive Model works, in public. It is not a new model and it does not claim new results. Samsung's paper and code are the source. This fork is the notebook of someone working through them from the outside.
+
+### Why this model
+
+TRM is a small network, about 7 million parameters, that solves hard puzzles by looping over its own answer. It scores 87% on Sudoku-Extreme, where a network of the same kind without the loop scores 0%. That makes it a good model to study for three reasons.
+
+- **It is small enough to read.** The core of the model is about twelve lines. The whole training script is one file.
+- **It is small enough to run.** One training run fits on a single GPU, and a short one fits on a laptop.
+- **The idea is unusual.** Most progress today comes from making models larger. TRM gets its results from reusing one tiny network many times.
+
+### What "learning in public" means here
+
+The work is done in the open, including the parts that go wrong.
+
+- **The steps are small and written down.** Each change is one commit with a plain explanation of what changed and why.
+- **Mistakes stay in the record.** The first Mac training run failed with a NaN loss. The cause and the fix are described below and in the commit history, not hidden.
+- **Numbers are measured, and labeled when they are not.** Speeds and memory use come from real runs on a named machine. Estimates are called estimates.
+- **Limits are stated.** Each section says what has not been tested.
+
+### What has been done so far
+
+- **Read the code and the paper.** That covers how the recursion, the halting and the training loop work.
+- **Ported the code to Apple Silicon.** Samsung's code needs an NVIDIA GPU. The `mac-port` branch runs on a Mac.
+- **Found and fixed a float32 bug in the loss.** The port exposed it. It does not show up on Samsung's setup.
+- **Ran a short Sudoku training run on a Mac.** It proves that training works. It is far too short to produce a useful model.
+
+### What comes next
+
+These are plans, not results.
+
+- **Smaller Sudoku boards.** A 6×6 board could train on a Mac in a reasonable time, and it would show the whole training loop from start to finish.
+- **A full Sudoku run.** The paper's run takes about 18 hours on one L40S GPU. The goal is to reproduce the 87% result on a rented GPU.
+- **Trying the idea on other step-by-step problems.** The open question is which other tasks can be written as a grid of tokens that a looping model can refine.
+
+## Running on a Mac
+
+Samsung's code needs an NVIDIA GPU with CUDA. The `mac-port` branch of this fork also runs on Apple Silicon through MPS, which is PyTorch's backend for the Mac's GPU. It still runs on CUDA, and it falls back to the CPU when neither is present.
+
+### What changed
+
+- **Device choice.** `pretrain.py` picks CUDA when it is present, then MPS, then the CPU. The hard-coded CUDA calls now use that one choice.
+- **fp32 forward pass.** The model's forward pass runs in bfloat16 on CUDA. On MPS that gave a NaN loss after a single step, so every other device uses float32.
+- **fp32 loss.** The stablemax loss casts to float64 on CUDA. MPS has no float64, so the loss runs in float32 there.
+- **A loss fix for float32.** In float32, a logit of exactly 1.0 gave the stablemax loss an infinite gradient, and the whole model turned NaN. This is rare, so it showed up only after 50 or more training steps. The loss now clamps the input of its unused branch, which keeps the gradient finite. Results are unchanged where the branch is used.
+- **The optimizer.** `adam-atan2` needs a CUDA build. When it is not installed, the code uses `adam-atan2-pytorch`, a pure-Python package with the same update rule and weight decay.
+- **Compilation.** `torch.compile` relies on Triton, which supports only CUDA. It now runs only on CUDA.
+- **Console metrics.** Training prints its metrics every 50 steps, and the eval prints its result. Before this, a run without wandb showed no loss.
+
+### Install
+
+```bash
+python3.12 -m venv .venv
+.venv/bin/pip install -r requirements-mac.txt
+```
+
+### Check that it runs
+
+This trains six steps on a random Sudoku-shaped batch. It needs no dataset and takes under a minute.
+
+```bash
+.venv/bin/python smoke_test.py 64
+```
+
+### A short training run
+
+Build the Sudoku dataset first, with the command in the Sudoku-Extreme section of the original README below. Then run:
+
+```bash
+WANDB_MODE=offline .venv/bin/python pretrain.py arch=trm data_paths="[data/sudoku-extreme-1k-aug-1000]" evaluators="[]" global_batch_size=256 epochs=100 eval_interval=100 lr=1e-4 puzzle_emb_lr=1e-4 weight_decay=1.0 puzzle_emb_weight_decay=1.0 arch.mlp_t=True arch.pos_encodings=none arch.L_layers=2 arch.H_cycles=3 arch.L_cycles=6 +run_name=mac_smoke ema=True
+```
+
+This is the paper's Sudoku setup, cut down to 100 epochs at batch 256. That is 390 steps. Drop `WANDB_MODE=offline` to log the run to your wandb account.
+
+The eval at the end runs over the whole test set, which has 422,786 puzzles and takes a long time on a Mac. The run measured below used a copy of the dataset whose test set was cut to the first 2,000 puzzles.
+
+### What to expect
+
+These numbers were measured on an Apple M2 Max with 64 GB of memory, with Python 3.12 and torch 2.15.0.
+
+| Batch size | Seconds per step | Memory |
+|---|---|---|
+| 128 | 1.34 | 14.1 GB |
+| 256 | about 2.7 | 26.6 GB |
+| 768 | does not fit | swaps past 38 GB |
+
+- **Memory.** float32 costs about 0.1 GB per example. The paper's batch of 768 does not fit in 64 GB.
+- **Speed.** Training runs at about 90 examples per second.
+- **The short run.** Training took about 18 minutes. The training loss fell from 2.55 to 2.20. The eval scored 10.4% of cells correct and solved no puzzles. A loss near 2.4 means the model is guessing, so this run only proves that training works. It does not produce a useful model.
+- **A full run.** The paper's Sudoku run is 50 million examples. At this speed that is about 6.5 days of training, so a full run still belongs on a rented GPU.
+
+### Limits
+
+- **CUDA is not re-tested.** The edited code has not been run on a CUDA machine since the port.
+- **ARC eval does not work on MPS.** `evaluators/arc.py` still casts to float64. Sudoku does not use it.
+- **Results may differ from the paper.** The Mac runs in float32 where CUDA uses bfloat16 and float64. Only a long run can show whether that changes accuracy.
 
 ---
 
