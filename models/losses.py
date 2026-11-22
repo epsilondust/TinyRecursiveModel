@@ -22,7 +22,9 @@ def log_stablemax(x, dim=-1):
 
 
 def stablemax_cross_entropy(logits, labels, ignore_index: int = -100, valid_mask=None):
-    logprobs = log_stablemax(logits.to(torch.float64), dim=-1)
+    # MPS has no float64, so the loss runs in float32 there.
+    dtype = torch.float32 if logits.device.type == "mps" else torch.float64
+    logprobs = log_stablemax(logits.to(dtype), dim=-1)
 
     if valid_mask is None:
         valid_mask = (labels != ignore_index)
