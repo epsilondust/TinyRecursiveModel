@@ -11,7 +11,9 @@ IGNORE_LABEL_ID = -100
 def s(x, epsilon=1e-30):
     return torch.where(
         x<0,
-        1/(1-x+ epsilon),
+        # The clamp keeps this branch finite where it is not used. In float32 a logit of
+        # exactly 1.0 otherwise gives an infinite gradient here, and the loss turns NaN.
+        1/(1-x.clamp(max=0)+ epsilon),
         x + 1
     )
 
