@@ -11,6 +11,14 @@ The experiment asks one question. TRM lets every cell of the board talk to every
 
 The code is on the `mesh-sudoku` branch, in `models/mesh_sudoku.py` and `train_mesh.py`. It is a separate small model, not a change to TRM.
 
+### What this experiment is for
+
+The goal was not to prove this architecture out. The goal was to show the work of handling an architecture: take a design, change it, update the code, and run it again.
+
+That is why training stopped at 20,000 steps. The run was long enough to show that the changed model trains and that the loop does its job. A longer run would raise the score. It would not show anything new about the workflow.
+
+Everything ran on a Mac through MPS, which is PyTorch's backend for Apple's Metal Performance Shaders. No rented GPU and no cluster were used. One command starts a run, and a change to the model can be tested the same afternoon.
+
 ### The board as a mesh
 
 A Sudoku cell shares a rule with 20 other cells. Eight are in its row, eight are in its column, and four more are in its box. The model wires each cell to those 20 and to nothing else.
@@ -51,7 +59,7 @@ Training stalled near 18% for about 4,000 steps and then climbed again. The char
 
 ### Limits
 
-- **Training was not finished.** The loss was still falling at the last step. The run saw about 5 million examples. TRM's run sees roughly ten times that.
+- **Training was stopped on purpose, and early.** The loss was still falling at the last step. The run saw about 5 million examples. TRM's run sees roughly ten times that.
 - **This is far below TRM.** TRM scores 87% on the same test set. This model scores 41.4%. The gap may come from the short run, the small size, or the mesh itself. One run cannot tell these apart.
 - **There is one run and one seed.** The numbers have no error bars.
 - **The two mesh models are not compared.** The sum model has no score on the full test set.
