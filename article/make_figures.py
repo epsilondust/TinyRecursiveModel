@@ -196,28 +196,20 @@ def fig_passes(by_pass, full):
          "Share of 422,786 test puzzles fully solved after each pass.", b)
 
 
-def fig_training(attn, sums):
+def fig_training(attn):
     b, fx, fy = chart(20000, 40, [0, 5000, 10000, 15000, 20000], [0, 10, 20, 30, 40], "Training steps")
-    b.append(line(sums, fx, fy, COL) + line(attn, fx, fy, ROW))
+    b.append(line(attn, fx, fy, ROW))
     x, y = attn[-1]
     b.append(dot(fx(x), fy(y), ROW) + text(fx(x), fy(y) + 30, f"{y:.1f}%", 20, weight="bold", anchor="end"))
-    x, y = sums[-1]
-    b.append(dot(fx(x), fy(y), COL))
-    b.append(f"<line x1='{fx(x)}' y1='{fy(y) + 8}' x2='{fx(x)}' y2='{fy(9)}' stroke='{INK2}'/>")
-    b.append(text(fx(x), fy(9) + 20, "Sum model, stopped at step 8,000", 15, INK2, anchor="middle"))
     # The stall, marked with a bracket above the flat stretch.
     b.append(f"<path d='M{fx(7000)},{fy(22)} L{fx(7000)},{fy(23)} L{fx(11000)},{fy(23)} L{fx(11000)},{fy(22)}' fill='none' stroke='{INK2}'/>")
     b.append(text(fx(9000), fy(23) - 10, "Stalls near 18% for 4,000 steps", 15, INK2, anchor="middle"))
-    for k, (color, name) in enumerate(((ROW, "Attention along the mesh"), (COL, "Plain neighbor sums"))):
-        y = 172 + k * 28
-        b.append(f"<line x1='110' y1='{y}' x2='140' y2='{y}' stroke='{color}' stroke-width='2.5'/>" + text(150, y + 5, name, 16))
     page("fig5_training.svg", "It stalls, then it climbs",
          "Share of 2,000 sample test puzzles solved during training. Checked every 1,000 steps.", b)
 
 
 if __name__ == "__main__":
     attn_steps, by_pass, full = read_log("mesh-attn.out")
-    sum_steps = read_log("mesh.out")[0]
     assert len(by_pass) == 64 and len(attn_steps) == 20, (len(by_pass), len(attn_steps))
     # The numbers written in fig 2 and fig 1 are derived here, so the pictures cannot drift from the rule.
     links = sum(relation(i, j) is not None for i in range(81) for j in range(81))
@@ -226,5 +218,5 @@ if __name__ == "__main__":
     fig_mask()
     fig_architecture()
     fig_passes(by_pass, full)
-    fig_training(attn_steps, sum_steps)
+    fig_training(attn_steps)
     print("wrote 5 figures")
