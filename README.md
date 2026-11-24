@@ -3,6 +3,12 @@ Experiments with Tiny Recursive Model
 
 This repository is a fork of [SamsungSAILMontreal/TinyRecursiveModels](https://github.com/SamsungSAILMontreal/TinyRecursiveModels). The original README follows the sections below.
 
+## What this fork is for
+
+This fork is a place to learn how the Tiny Recursive Model works, in public. It is not a new model and it does not claim new results. Samsung's paper and code are the source. This fork is the notebook of someone working through them from the outside.
+
+It is also a place to experiment. Some of the work here changes the model, or reshapes it into something different, to see what happens. The mesh Sudoku section below is the first example. Those experiments are small and are labeled as experiments.
+
 ## Latest experiment: Sudoku as a mesh
 
 This section is the newest work. The sections under it are older, and they read in the order the work was done.
@@ -74,9 +80,7 @@ python article/make_figures.py
 
 The first command runs the self-checks. One of them proves that a cell changes only when one of its 20 neighbors changes. The second trains the attention model and scores the full test set. The third redraws the figures. It reads the training logs in `data/logs`, which are not in the repo. It needs a log from a sum model run as well, saved as `data/logs/mesh.out`.
 
-## What this fork is for
-
-This fork is a place to learn how the Tiny Recursive Model works, in public. It is not a new model and it does not claim new results. Samsung's paper and code are the source. This fork is the notebook of someone working through them from the outside.
+## Earlier work
 
 ### Why this model
 
