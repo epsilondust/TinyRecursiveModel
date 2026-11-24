@@ -11,74 +11,19 @@ It is also a place to experiment. Some of the work here changes the model, or re
 
 ## Latest experiment: Sudoku as a mesh
 
-This section is the newest work. The sections under it are older, and they read in the order the work was done.
+This is a small experiment on the `mesh-sudoku` branch. Each Sudoku cell can only talk to the 20 cells it shares a rule with, which are its row, its column and its box. One block of attention runs 32 times over that mesh. The whole model has 113,673 weights.
 
-The experiment asks one question. TRM lets every cell of the board talk to every other cell. What happens if a cell can only talk to the cells it shares a rule with?
+<img src="article/fig1_mesh.png" width="49%" alt="One cell of a Sudoku board with its row, column and box highlighted"> <img src="article/fig2_links.png" width="49%" alt="Two link maps: every pair of cells linked, and only the mesh links">
 
-The code is on the `mesh-sudoku` branch, in `models/mesh_sudoku.py` and `train_mesh.py`. It is a separate small model, not a change to TRM.
+<img src="article/fig3_architecture.png" width="70%" alt="Architecture diagram: embed, then one block of mesh attention and an MLP run 32 times, then a readout">
 
-### What this experiment is for
+The goal was not to prove this architecture out. The goal was to show the work of changing an architecture and running it again, on a Mac through MPS, which is PyTorch's backend for Apple's Metal Performance Shaders. Training was stopped on purpose at 20,000 steps, after about 2.4 hours.
 
-The goal was not to prove this architecture out. The goal was to show the work of handling an architecture: take a design, change it, update the code, and run it again.
+At that point the model solves 41.4% of the 422,786 test puzzles with 64 passes, and 37.0% with 32. TRM solves 87%. This is one short run with one seed.
 
-That is why training stopped at 20,000 steps. The run was long enough to show that the changed model trains and that the loop does its job. A longer run would raise the score. It would not show anything new about the workflow.
+<img src="article/fig4_passes.png" width="49%" alt="Line chart of puzzles solved after each pass, rising from 0 to 41.4%"> <img src="article/fig5_training.png" width="49%" alt="Line chart of puzzles solved during training">
 
-Everything ran on a Mac through MPS, which is PyTorch's backend for Apple's Metal Performance Shaders. No rented GPU and no cluster were used. One command starts a run, and a change to the model can be tested the same afternoon.
-
-### The board as a mesh
-
-A Sudoku cell shares a rule with 20 other cells. Eight are in its row, eight are in its column, and four more are in its box. The model wires each cell to those 20 and to nothing else.
-
-![One cell of a Sudoku board with its row, column and box highlighted](article/fig1_mesh.png)
-
-A standard transformer has 6,480 links between the 81 cells. The mesh keeps 1,620 of them, which is one quarter. A cell has no position embedding either. It knows its neighbors and nothing more.
-
-![Two link maps: every pair of cells linked, and only the mesh links](article/fig2_links.png)
-
-### The model
-
-The model has one block, and it runs that block 32 times. The same weights are used on every pass.
-
-Inside the block, attention runs along the mesh. Two heads look along the row, two along the column, and two inside the box. The clues are added back in on every pass, so they cannot fade from the state. The loss scores the board after every pass, not only the last one.
-
-The whole model has 113,673 weights. TRM has about 7 million.
-
-![Architecture diagram: embed, then one block of mesh attention and an MLP run 32 times, then a readout](article/fig3_architecture.png)
-
-### Results
-
-The numbers below come from one run of 20,000 steps on a Mac. The run took about 2.4 hours at 0.44 seconds per step and used 6.6 GB of memory.
-
-| Measure, on all 422,786 test puzzles | Score |
-| --- | --- |
-| Puzzles solved after 32 passes | 37.0% |
-| Puzzles solved after 64 passes | 41.4% |
-| Cells correct | 79.9% |
-
-The model was trained with 32 passes. It still improves when it is given 64, which it never saw in training. Almost nothing is solved before pass 12, so the loop is doing the work.
-
-![Line chart of puzzles solved after each pass, rising from 0 to 41.4%](article/fig4_passes.png)
-
-Training stalled near 18% for about 4,000 steps and then climbed again. The chart also shows an earlier model that used plain neighbor sums in place of attention. That run was stopped at step 8,000, so the two models have not been compared fairly.
-
-![Line chart of puzzles solved during training for the attention model and the sum model](article/fig5_training.png)
-
-### Limits
-
-- **Training was stopped on purpose, and early.** The loss was still falling at the last step. The run saw about 5 million examples. TRM's run sees roughly ten times that.
-- **This is far below TRM.** TRM scores 87% on the same test set. This model scores 41.4%. The gap may come from the short run, the small size, or the mesh itself. One run cannot tell these apart.
-- **There is one run and one seed.** The numbers have no error bars.
-- **The two mesh models are not compared.** The sum model has no score on the full test set.
-
-### Run it
-
-```bash
-python models/mesh_sudoku.py
-python train_mesh.py --model attn --name mesh-attn --full-eval --no-wandb | tee data/logs/mesh-attn.out
-python article/make_figures.py
-```
-
-The first command runs the self-checks. One of them proves that a cell changes only when one of its 20 neighbors changes. The second trains the attention model and scores the full test set. The third redraws the figures. It reads the training logs in `data/logs`, which are not in the repo. It needs a log from a sum model run as well, saved as `data/logs/mesh.out`.
+The code is in `models/mesh_sudoku.py` and `train_mesh.py`. The figures are drawn by `article/make_figures.py`.
 
 ## Earlier work
 
